@@ -1,0 +1,244 @@
+# ==========================================================
+# This file includes the agent class
+# ==========================================================
+
+# =============================================================================
+# 0. Libraries
+# =============================================================================
+import numpy as np
+import random
+from itertools import product
+# =============================================================================
+# 1. Agent class
+# =============================================================================
+class agent_class:
+    def __init__(self, S, A, gamma, terminal_state_idx, EPISODE_BLOCK, total_interaction, calculate_return_immediate, epsilon_decay, T_decay, lambda_value):
+        """
+        Initialize an agent.
+
+        Args:
+            S : np.ndarray
+                Array of states
+            A : np.ndarray
+                Array of actions
+            gamma : float
+                Discount factor in [0, 1]
+        
+        Returns:
+            agent object
+        """
+        self.S = S  # states
+        self.A = A  # actions
+        self.gamma = gamma  # Discount factor
+        self.terminal_state_idx = terminal_state_idx
+        self.EPISODE_BLOCK = EPISODE_BLOCK
+        self.total_interaction = total_interaction
+        self.calculate_return_immediate = calculate_return_immediate
+        self.epsilon_decay = epsilon_decay
+        self.T_decay = T_decay
+        self.lambda_value = lambda_value
+        self.list_of_returns = []
+
+    
+        # Check discount factor validity
+        if not (0 <= gamma <= 1):
+            raise ValueError("Discount factor γ must be between 0 and 1")
+        
+
+    def Q_learning_func(self, obj_env, discount_value, initial_state_idx , select_action_strategy, T=1):
+        """
+        Q_learning algorithm.
+
+        Args:
+            obj_env : object
+                An object from environment.
+            discount_value : float
+                A float number.
+            select_action_strategy : function
+                A function to choose the action.
+            max_episodes : int
+                Number of max iteration.
+
+        Returns:
+            Q_table : numpy array 2D
+                The Q value for all states and actions pairs.
+            epsilon_values: A list
+                List of all epsilons.
+        """
+        
+        # Initializing
+        Q_hat = np.zeros((len(self.S),len(self.A)), dtype=float)
+        num_visit = np.zeros((len(self.S),len(self.A)), dtype=int)
+        epsilon = 0.9           # initial epsilon
+        epsilon_min = 0.01       # optional lower bound
+        T_min = 0.05
+        epsilon_values = [] # to check the condition of epsilon later
+        total_interaction_manual = 0 # in all episodes
+
+        # inside of a block of episodes
+        for episode in range(self.EPISODE_BLOCK):
+            
+            # choose the start state
+            if initial_state_idx is not None:
+                s_idx = initial_state_idx
+            else:
+                s_idx = np.random.randint(0,len(self.S))
+
+            done = False
+            step = 0 # in one episode
+            R = 0
+        
+            # Inside an episode
+            while not done:
+                
+                # choose an action by one of the strategies
+                if select_action_strategy == "epsilon_greedy":
+                    a_idx = self.epsilon_greedy(s_idx, Q_hat, self.A, epsilon) 
+                
+                elif select_action_strategy == "Boltzmann":
+                    a_idx = self.boltzmann(s_idx, Q_hat, self.A, T) 
+
+                else:
+                    raise ValueError("No action strategy was provided.")
+                
+                # observe st+1 and rt
+                if obj_env.transition_func_provided:
+                    next_state_idx = obj_env.step(s_idx, a_idx)
+                    reward = obj_env.reward_function(next_state_idx)
+
+                else:
+                    next_state_idx , reward = obj_env.interaction(s_idx, a_idx) 
+                
+                # calculate the TD error
+                TD_error = reward + (discount_value * (np.max(Q_hat[next_state_idx,:]))) - Q_hat[s_idx, a_idx]
+                
+                # calculate learning step
+                if obj_env.determinist == False: # stochastic
+                    learning_step = 1/(num_visit[s_idx,a_idx] + 1)
+                else: # deterministic
+                    learning_step = 1
+
+                # Calculate reward immediate
+                if self.calculate_return_immediate:
+                    R += self.calculate_return_immediate_func(self.gamma, step, reward)
+
+                # update Q_hat
+                Q_hat[s_idx, a_idx] = Q_hat[s_idx, a_idx] + learning_step * (TD_error)
+
+                # update number of visited
+                num_visit[s_idx,a_idx] += 1
+
+                # check the stop condition
+                done = self.stop_condition(obj_env.gamma, step, s_idx, self.total_interaction)
+
+                # take the next step
+                s_idx = next_state_idx
+
+                step += 1 # increase 
+
+            # end of an episode
+            self.list_of_returns.append(R)
+            
+            # save the total interaction
+            total_interaction_manual += step
+
+            # save epsilon
+            epsilon_values.append(epsilon)
+        
+            # Decreasing epsilon for epsilon greedy
+            epsilon = max(epsilon_min, epsilon * self.epsilon_decay)
+
+            # Decreasing temperture
+            T = max(T_min, T * self.T_decay)
+
+        # end of a block of episodes
+        
+        if self.total_interaction:
+           total_interaction = self.total_interaction
+        else:
+            total_interaction = total_interaction_manual
+
+        return Q_hat, epsilon_values, total_interaction
+    
+
+    
+    
+    def epsilon_greedy(self, s_idx, Q_hat, A, epsilon):
+        if np.random.rand() < epsilon:
+            # explore: random action
+            return np.random.randint(0, len(A))
+        else:
+            # exploit: choose best action
+            a = np.argmax(Q_hat[s_idx])
+            return a
+        
+    def boltzmann(self, s_idx, Q_hat, A, T):
+            
+        """
+        Boltzmann (softmax) action selection.
+
+        Args:
+            s_idx : int
+                Current state index
+            Q_hat : np.ndarray
+                Q-table of shape (num_states, num_actions)
+            A : np.ndarray or list
+                Action space
+            T : float
+                Temperature (T > 0)
+
+        Returns:
+            a_idx : int
+                Selected action index
+        """
+        if T <= 0:
+            raise ValueError("Temperature T must be > 0")
+
+        # Extract Q-values for the current state
+        q_values = Q_hat[s_idx]
+
+        # Numerical stability trick: subtract max
+        q_values_stable = q_values - np.max(q_values)
+
+        # Compute softmax probabilities
+        exp_q = np.exp(q_values_stable / T)
+        probs = exp_q / np.sum(exp_q)
+
+        # Sample action according to the probabilities
+        a_idx = np.random.choice(len(A), p=probs)
+
+        return a_idx
+    
+    def stop_condition(self, gamma, step, current_state_idx, total_interaction):
+        
+        if total_interaction != None: # if there is a number of interactions
+            if step == total_interaction:
+                return True
+            
+        if self.terminal_state_idx == None: # there is No terminal state
+            max_steps = 5000
+            return gamma**step <= 1e-6 or step >= max_steps
+        else:
+            if current_state_idx == self.terminal_state_idx:
+                return True
+            
+        if current_state_idx in [5,7,11,12]: # for TUX penguin
+            return True
+    
+    def calculate_return_immediate_func(self, gamma, step, reward):
+        return (gamma ** step) * reward
+    
+    def trainning(self, RL_method, action_strategy, env_obj, initial_state_idx):
+
+        if RL_method == "Q_Learning":
+            Q_hat, epsilon_values, total_interaction = self.Q_learning_func(env_obj, self.gamma, initial_state_idx, action_strategy, T=10)
+            
+            return Q_hat, epsilon_values, total_interaction, self.list_of_returns
+        
+        elif RL_method == "SARSA":
+            pass
+
+        elif RL_method == "Evidence_of_eligibility":
+            pass
+        else:
+            raise ValueError("No RL method was provided.")
