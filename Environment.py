@@ -25,7 +25,19 @@ class continues_environment_class:
         """
         self.transition_fn = transition_fn  # Transition probabilities P[s, a, s']
         self.reward_fn = reward_fn          # Reward function R[s, a, s']
+        self.state = None
+        self.done = None
+        self.steps = None
     
+    def reset(self, initial_state):
+        try:
+            self.done = False
+            self.steps = 0
+            self.state = initial_state
+
+        except:
+            raise ValueError("Environment didnt reset.")
+
     def interaction(self, current_p, current_v, action):
         """
         response of env to agent taking action 'a' in a state 's' "
