@@ -11,7 +11,7 @@ import numpy as np
 # 1. Environment class
 # =============================================================================
 class continues_environment_class:
-    def __init__(self, transition_fn, reward_fn):
+    def __init__(self, transition_fn, reward_fn, stop_func, deterministic):
         """
         Initialize a Markov Decision Problem (MDP)
 
@@ -25,18 +25,26 @@ class continues_environment_class:
         """
         self.transition_fn = transition_fn  # Transition probabilities P[s, a, s']
         self.reward_fn = reward_fn          # Reward function R[s, a, s']
+        self.stop_func = stop_func # stop condition
         self.state = None
         self.done = None
         self.steps = None
+        self.deterministic = deterministic
     
-    def reset(self, initial_state):
+    def reset(self, initial_state_idx, S):
+        
         try:
             self.done = False
             self.steps = 0
-            self.state = initial_state
+
+            # choose the start state
+            if initial_state_idx is not None:
+                self.state = initial_state_idx
+            else:
+                self.state = np.random.randint(0,len(S))
 
         except:
-            raise ValueError("Environment didnt reset.")
+            raise ValueError("Reset fails.")
 
     def interaction(self, current_p, current_v, action):
         """
@@ -54,14 +62,10 @@ class continues_environment_class:
             s t+1 : the next state.
         """
         # Transition function
-        next_p, next_v = self.transition_fn(current_p, current_v, action, next_p, next_v)
+        next_p, next_v = self.transition_fn(current_p, current_v, action)
 
         # Reward function
-        reward = self.reward_fn(next_p, next_v, action)
-        done = self.stop_condition()
+        reward = self.reward_fn(current_p, current_v, action, next_p, next_v)
+        self.done = self.stop_func(current_p, current_v, action, next_p, next_v)
 
-        return next_p, next_v, reward, done
-    
-    def stop_conditon(self):
-        pass
-
+        return next_p, next_v, reward

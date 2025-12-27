@@ -1,0 +1,55 @@
+# create problem
+from Environment import continues_environment_class
+from agent import agent_class
+import numpy as np
+
+# Transition function
+def transition_calculation_pendulum(current_p, current_v, current_u):
+    """
+    Calculates the next angular position and velocity of a pendulum given the current state and applied torque.
+    
+    Args:
+        current_p (float) – Current angular position of the pendulum.
+
+        current_v (float) – Current angular velocity of the pendulum.
+
+        u (float) – Applied torque.
+
+        delta_t (float, optional) – Time step for the state update. Default is 0.01.
+
+    Returns:
+
+        new_p (float) – Updated angular position after applying the dynamics.
+
+        new_v (float) – Updated angular velocity after applying the dynamics.
+    """
+    m = 1
+    l=1
+    µ = 0.01
+    g = 9.81
+    delta_t = 0.01
+
+    # 1. Compute acceleration
+    a =  (1/m*pow(l,2)) * (-(µ*current_v) + (m*g*l*(np.sin(current_p))) + current_u)
+
+    # 2. Compute next continuous state
+    new_v = current_v + (a * delta_t) 
+    new_p = current_p + (new_v * delta_t) 
+    return new_p, new_v
+
+# Reward function
+def reward_calculation_pendulum(current_p, current_v, u, next_p, next_v):
+
+    return np.cos(current_p)
+
+def stop_func(current_p, current_v, action, next_p, next_v):
+    if current_p == 0:
+        return True
+    
+env_obj = continues_environment_class(transition_calculation_pendulum, reward_calculation_pendulum,stop_func, True)
+agent_obj = agent_class(P=(-np.pi, np.pi), V=(-10,10), U=[-5, 0 ,5], 
+                        num_grid_p=40, num_grid_v =40, gamma=0.9,
+                        total_interaction=None, calculate_return_immediate=False, 
+                        epsilon_decay=0.8, T_decay=0.8)
+
+agent_obj.Q_learning_func(env_obj, None, "epsilon_greedy", 50)
