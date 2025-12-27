@@ -70,21 +70,16 @@ class agent_class:
         Q_hat = np.zeros((len(self.S),len(self.A)), dtype=float)
         num_visit = np.zeros((len(self.S),len(self.A)), dtype=int) 
         epsilon_values = [] # to check the condition of epsilon later
-        total_interaction_manual = 0 # in all episodes
+        total_interaction = 0
 
         # inside of a block of episodes
         for episode in range(EPISODE_BLOCK):
             
-            # reset env
-
-            obj_env.reset(initial_state_idx, self.S)
-            s_idx = obj_env.state
-
-            print(obj_env.done)
-            print(obj_env.state, s_idx)
-            print(obj_env.steps)
-            
+            obj_env.reset(initial_state_idx, self.P, self.V)
+            s_idx = self.find_cell(obj_env.state[0], obj_env.state[1], 
+                              self.p_bins, self.v_bins)
             R = 0
+            step = 0
         
             # Inside an episode
             while not obj_env.done:
@@ -93,7 +88,7 @@ class agent_class:
                 if select_action_strategy == "epsilon_greedy":
                     
                     a_idx = self.epsilon_greedy(s_idx, Q_hat, self.A, epsilon) 
-                
+                    
                 elif select_action_strategy == "Boltzmann":
                     
                     a_idx = self.boltzmann(s_idx, Q_hat, self.A, T) 
@@ -103,19 +98,31 @@ class agent_class:
                 
                 # observe st+1 and rt
                 if obj_env.transition_fn and obj_env.reward_fn:
-                    current_p, current_v = self.find_p_v(cell_id=obj_env.state, grid_dict=self.grid_dict)
+                    # Get current continuous state
+                    current_p, current_v = obj_env.state
+                    
+                    # Take action
                     next_p, next_v, reward = obj_env.interaction(current_p, current_v, self.A[a_idx])
+
+                    # Update environment state
+                    obj_env.state = (next_p, next_v)
 
                 else:
                     raise ValueError("No transition of reward function was provided.")
                 
-                # calculate the TD error
+                # Convert next state to discrete
                 next_state_idx = self.find_cell(next_p, next_v, self.p_bins, self.v_bins)
-                TD_error = reward + (self.gamma * (np.max(Q_hat[next_state_idx,:]))) - Q_hat[s_idx, a_idx]
+                
+                # Calculate the TD error
+                td_target = reward
+                if not obj_env.done:
+                    td_target += self.gamma * np.max(Q_hat[next_state_idx, :])
+
+                TD_error = td_target - Q_hat[s_idx, a_idx]
                 
                 # calculate learning step
                 if obj_env.deterministic: 
-                    learning_step = 1
+                    learning_step = 0.1 # Use fixed learning rate
                 else: # stochastic
                     learning_step = 1/(num_visit[s_idx,a_idx] + 1)
 
@@ -123,40 +130,37 @@ class agent_class:
                 if self.calculate_return_immediate:
                     R += self.calculate_return_immediate_func(self.gamma, obj_env.steps, reward)
 
-                # update Q_hat
-                Q_hat[s_idx, a_idx] = Q_hat[s_idx, a_idx] + learning_step * (TD_error)
-                print(Q_hat[s_idx, a_idx])
+                # Update Q-value
+                Q_hat[s_idx, a_idx] += learning_step * TD_error
+                
+                # Debug prints
+                if episode % 10 == 0 and step == 0:
+                    print(f"Episode {episode}, Step {total_interaction}:")
+                    print(f"  State: ({current_p:.3f}, {current_v:.3f}) -> cell {s_idx}")
+                    print(f"  Action: {self.A[a_idx]}")
+                    print(f"  Reward: {reward:.3f}")
+                    print(f"  TD error: {TD_error:.6f}")
+                    print(f"  Q-value: {Q_hat[s_idx, a_idx]:.6f}")
+
                 # update number of visited
                 num_visit[s_idx,a_idx] += 1
 
-                # take the next step
+                # Move to next state
                 s_idx = next_state_idx
+                step += 1
+                obj_env.steps += step # increase 
+                total_interaction += step 
+                # Add episode termination condition
+                if step >= 500:  # Limit episode length
+                    obj_env.done = True
 
-                obj_env.steps += 1 # increase 
-
-            # end of an episode
-            self.list_of_returns.append(R)
-            
-            # save the total interaction
-            total_interaction_manual += obj_env.steps
-
-            # save epsilon
+            # End of episode
+            epsilon = max(epsilon_min, epsilon * self.epsilon_decay)
+            T = max(T_min, T * self.T_decay)
             epsilon_values.append(epsilon)
         
-            # Decreasing epsilon for epsilon greedy
-            epsilon = max(epsilon_min, epsilon * self.epsilon_decay)
-
-            # Decreasing temperture
-            T = max(T_min, T * self.T_decay)
-
         # end of a block of episodes
-        
-        if self.total_interaction:
-           total_interaction = self.total_interaction
-        else:
-            total_interaction = total_interaction_manual
-
-        return Q_hat, epsilon_values, total_interaction
+        return Q_hat, epsilon_values, step
     
     def rectangle_discretized_state_space(self, p, v, num_grid_p, num_grid_v):
         """
@@ -200,7 +204,7 @@ class agent_class:
 
         return p_bins, v_bins, grid_dict
     
-    def find_cell(self, p, v, p_bins, v_bins):
+    def find_cell(self, p, v, p_bins, v_bins): 
         """
         Get (p,v), find the cell_id corresponding.
 
@@ -222,9 +226,9 @@ class agent_class:
         i = np.clip(i, 0, len(p_bins) - 2)
         j = np.clip(j, 0, len(v_bins) - 2)
 
-        # Flatten 2D grid to 1D index
-        num_v = len(v_bins) - 1   # number of vertical cells (velocity)
-        cell_id = i * num_v + j
+        # Flatten 2D grid to 1D index 
+        num_p = len(p_bins) - 1   # number of horizontal cells (position)
+        cell_id = j * num_p + i   # Row-major order: velocity first
 
         return cell_id
 

@@ -40,16 +40,24 @@ def transition_calculation_pendulum(current_p, current_v, current_u):
 # Reward function
 def reward_calculation_pendulum(current_p, current_v, u, next_p, next_v):
 
-    return np.cos(current_p)
+    return np.cos(current_p) - 0.01 * abs(u)
 
 def stop_func(current_p, current_v, action, next_p, next_v):
-    if current_p == 0:
+    # Check if pendulum is upright (within tolerance)
+    if abs(current_p) < 0.1 and abs(current_v) < 0.5:
         return True
+    return False
     
-env_obj = continues_environment_class(transition_calculation_pendulum, reward_calculation_pendulum,stop_func, True)
+env_obj = continues_environment_class(transition_calculation_pendulum, reward_calculation_pendulum, stop_func, True)
 agent_obj = agent_class(P=(-np.pi, np.pi), V=(-10,10), U=[-5, 0 ,5], 
-                        num_grid_p=40, num_grid_v =40, gamma=0.9,
+                        num_grid_p=20, num_grid_v =20, gamma=0.95,
                         total_interaction=None, calculate_return_immediate=False, 
-                        epsilon_decay=0.8, T_decay=0.8)
+                        epsilon_decay=0.995, T_decay=0.8)
 
-agent_obj.Q_learning_func(env_obj, None, "epsilon_greedy", 50)
+Q_table, epsilon_values, steps = agent_obj.Q_learning_func(env_obj, None, "epsilon_greedy", 
+                                                           EPISODE_BLOCK=200, epsilon=1.0, epsilon_min=0.1 )
+
+print(f"Q-table shape: {Q_table.shape}")
+print(f"Min Q-value: {np.min(Q_table):.4f}")
+print(f"Max Q-value: {np.max(Q_table):.4f}")
+print(f"Mean Q-value: {np.mean(Q_table):.4f}")

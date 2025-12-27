@@ -31,20 +31,22 @@ class continues_environment_class:
         self.steps = None
         self.deterministic = deterministic
     
-    def reset(self, initial_state_idx, S):
+    def reset(self, initial_state_idx, P, V):
         
-        try:
-            self.done = False
-            self.steps = 0
+        self.done = False
+        self.steps = 0
 
-            # choose the start state
-            if initial_state_idx is not None:
-                self.state = initial_state_idx
-            else:
-                self.state = np.random.randint(0,len(S))
-
-        except:
-            raise ValueError("Reset fails.")
+        # choose the start state
+        if initial_state_idx is None:
+            # Choose random continuous state within bounds
+            p = np.random.uniform(P[0], P[1])
+            v = np.random.uniform(V[0], V[1])
+            self.state = (p, v)  # Store as continuous tuple
+        else:
+            # Convert discrete index to continuous state
+            # You need a method to convert discrete to continuous
+            p, v = initial_state_idx  # Assuming it's already (p, v)
+            self.state = (p, v)
 
     def interaction(self, current_p, current_v, action):
         """
@@ -66,6 +68,8 @@ class continues_environment_class:
 
         # Reward function
         reward = self.reward_fn(current_p, current_v, action, next_p, next_v)
+
+        # Update stop condition with tolerance
         self.done = self.stop_func(current_p, current_v, action, next_p, next_v)
 
         return next_p, next_v, reward
